@@ -25,7 +25,7 @@ VIDEOS_DICT = {
 }
 
 MODEL_DIR = ROOT / 'weights'
-DETECTION_MODEL = 'save_best6.pt'
+DETECTION_MODEL = 'best2.pt'
 SEGMENTATION_MODEL = MODEL_DIR / 'yolov8n-seg.pt'
 
 WEBCAM_PATH = 0
