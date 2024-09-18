@@ -1,83 +1,97 @@
+# File: streamlit_app.py
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer, WebRtcMode
-from ultralytics import YOLO
+from pathlib import Path
+import PIL
+import settings
+import helper
 
-# Etiquetas en español (puedes expandir este diccionario según sea necesario)
-etiquetas_es = {
-    'person': 'persona',
-    'bicycle': 'bicicleta',
-    'car': 'coche',
-    'motorcycle': 'motocicleta',
-    'airplane': 'avión',
-    'bus': 'autobús',
-    'train': 'tren',
-    'truck': 'camión',
-    'boat': 'barco',
-    # Añade más traducciones según sea necesario
-}
+st.set_page_config(
+    page_title="Object Detection using YOLOv8",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-def load_model(model_path):
-    """
-    Carga un modelo de detección de objetos YOLO desde el model_path especificado.
-    
-    Parámetros:
-        model_path (str): La ruta al archivo del modelo YOLO.
-    Retorna:
-        Un modelo de detección de objetos YOLO.
-    """
-    model = YOLO(model_path)
-    return model
+st.markdown("""
+    <style>
+    .main {
+        background-color: #AF4D8D;
+        padding: 2rem;
+        border-radius: 10px;
+    }
+    #MainMenu {visibility: hidden;}
+    .stDeployButton {display:none;}
+    footer {visibility: hidden;}
+    #stDecoration {display:none;}
+    header {visibility: hidden;}
+    [data-testid="stToolbar"] {visibility: hidden !important;}
+    </style>
+    """, unsafe_allow_html=True)
 
-class VideoProcessor:
-    def __init__(self, model, conf):
-        self.model = model
-        self.conf = conf
+model_type = st.sidebar.radio("Tipo coordenadas detección", ['YOLO'])
+confidence = float(st.sidebar.slider("Formato usado: pytorch", 25, 100, 40)) / 100
 
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        
-        # Realizar detección de objetos
-        results = self.model(img, conf=self.conf)
-        
-        # Dibujar los objetos detectados en la imagen
-        annotated_frame = results[0].plot()
-        
-        # Traducir etiquetas al español
-        for det in results[0].boxes.data.tolist():
-            x1, y1, x2, y2, score, class_id = det
-            class_name = results[0].names[int(class_id)]
-            translated_name = etiquetas_es.get(class_name, class_name)  # Usar original si no hay traducción
-            label = f"{translated_name} {score:.2f}"
-            cv2.putText(annotated_frame, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-        
-        return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
+if model_type == 'YOLO':
+    model_path = Path(settings.DETECTION_MODEL)
+#elif model_type == 'Segmentation':
+#    model_path = Path(settings.SEGMENTATION_MODEL)
 
-def main():
-    st.title("Detección de Objetos en Tiempo Real con YOLO (Modelo best2.pt)")
+try:
+    model = helper.load_model(model_path)
+except Exception as ex:
+    st.error(f"Unable to load model. Check the specified path: {model_path}")
+    st.error(ex)
 
-    # Barra lateral para el umbral de confianza
-    st.sidebar.header("Configuración")
-    confidence_threshold = st.sidebar.slider("Umbral de Confianza", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
+st.sidebar.header("Modelo IA")
+source_radio = st.sidebar.radio("Red neuronal convolucional", settings.SOURCES_LIST)
 
-    # Cargar el modelo YOLO best2.pt
-    model_path = "best2.pt"
-    model = load_model(model_path)
+if source_radio == settings.IMAGE:
+    source_img = st.sidebar.file_uploader("Choose an image...", type=("jpg", "jpeg", "png", 'bmp', 'webp'))
 
-    # Crear una instancia de VideoProcessor
-    processor = VideoProcessor(model, confidence_threshold)
+    col1, col2 = st.columns(2)
 
-    webrtc_ctx = webrtc_streamer(
-        key="object-detection",
-        mode=WebRtcMode.SENDRECV,
-        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-        video_processor_factory=lambda: processor,
-        async_processing=True,
-    )
+    with col1:
+        try:
+            if source_img is None:
+                default_image_path = str(settings.DEFAULT_IMAGE)
+                default_image = PIL.Image.open(default_image_path)
+                st.image(default_image_path, caption="Default Image", use_column_width=True)
+            else:
+                uploaded_image = PIL.Image.open(source_img)
+                st.image(source_img, caption="Uploaded Image", use_column_width=True)
+        except Exception as ex:
+            st.error("Error occurred while opening the image.")
+            st.error(ex)
 
-    if webrtc_ctx.video_processor:
-        st.write("El streaming de la cámara web está activo. Los objetos detectados se mostrarán en tiempo real.")
-    
-    st.markdown("Nota: Asegúrate de permitir el acceso a la cámara cuando el navegador lo solicite.")
+    with col2:
+        if source_img is None:
+            default_detected_image_path = str(settings.DEFAULT_DETECT_IMAGE)
+            default_detected_image = PIL.Image.open(default_detected_image_path)
+            st.image(default_detected_image_path, caption='Detected Image', use_column_width=True)
+        else:
+            if st.sidebar.button('Detect Objects'):
+                res = model.predict(uploaded_image, conf=confidence)
+                boxes = res[0].boxes
+                res_plotted = res[0].plot()[:, :, ::-1]
+                st.image(res_plotted, caption='Detected Image', use_column_width=True)
+                try:
+                    with st.expander("Detection Results"):
+                        for box in boxes:
+                            st.write(box.data)
+                except Exception as ex:
+                    st.write("No image is uploaded yet!")
 
-if __name__ == "__main__":
-    main()
+elif source_radio == settings.VIDEO:
+    helper.play_stored_video(confidence, model)
+
+elif source_radio == settings.WEBCAM:
+    helper.play_webcam(confidence, model)
+
+elif source_radio == settings.RTSP:
+    helper.play_rtsp_stream(confidence, model)
+
+elif source_radio == settings.YOUTUBE:
+    helper.play_youtube_video(confidence, model)
+
+else:
+    st.error("Please select a valid source type!")
