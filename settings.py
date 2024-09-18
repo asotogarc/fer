@@ -33,7 +33,6 @@ WEBCAM_PATH = 0
 # File: helper.py
 from ultralytics import YOLO
 import streamlit as st
-import cv2
 import yt_dlp
 import settings
 from PIL import Image
