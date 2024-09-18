@@ -1,6 +1,5 @@
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, WebRtcMode
-import numpy as np
 from ultralytics import YOLO
 
 # Etiquetas en español (puedes expandir este diccionario según sea necesario)
